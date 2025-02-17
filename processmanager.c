@@ -147,7 +147,8 @@ char * get_input(char * buffer, char * args[], int args_count_max) {
 }
 
 bool valid_command(char cmd[]){
-    return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") || strcmp(cmd, "resume") || strcmp(cmd, "stop");
+    printf("%s", cmd);
+    return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") == 0|| strcmp(cmd, "resume") == 0|| strcmp(cmd, "stop") == 0;
 }
 /******************************************************************************
  * Entry point
