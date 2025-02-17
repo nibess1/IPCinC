@@ -12,25 +12,33 @@
  ******************************************************************************/
 
 typedef enum process_status {
-	UNUSED = 0,
-	RUNNING = 1,
-	KILLED = 2
+	RUNNING = 0,
+    READY = 1,
+    STOPPED = 2,
+    TERMINATED = 3,
+    UNUSED = 4
 } process_status;
 
 typedef struct process_record {
 	pid_t pid;
+    int index;
 	process_status status;
-} process_record;
+    char * args[10];
+ } process_record;
 
 /******************************************************************************
  * Globals
  ******************************************************************************/
 
 enum {
-	MAX_PROCESSES = 3
+	MAX_PROCESSES = 99,
+    MAX_QUEUE = 96,
+    MAX_RUNNING = 3
 };
 
-process_record process_records[MAX_PROCESSES];
+process_record process_records[MAX_PROCESSES] = {-1, -1, UNUSED, NULL};
+process_record* running_processes[MAX_RUNNING] = {NULL};
+process_record* process_queue[MAX_QUEUE] = {NULL};
 
 void perform_run(char* args[]) {
 	int index = -1;
@@ -119,7 +127,20 @@ void perform_exit(void) {
 	printf("bye!\n");
 }
 
-char * get_input(char * buffer, char * args[], int args_count_max) {
+void process_input(char * buffer, char * args[], int args_count_max){
+    char * p = strtok(buffer, " ");
+	int arg_cnt = 0;
+	while (p != NULL) {
+		args[arg_cnt++] = p;
+		if (arg_cnt == args_count_max - 1) {
+			break;
+		}
+		p = strtok(NULL, " ");
+	}
+	args[arg_cnt] = NULL;
+}
+
+char * get_input(char * buffer) {
 	// capture a command
 	printf("\x1B[34m" "cs205" "\x1B[0m" "$ ");
 	fgets(buffer, 79, stdin);
@@ -132,22 +153,12 @@ char * get_input(char * buffer, char * args[], int args_count_max) {
 	strcat(buffer, " ");
     char buffer2[80];
     strcpy(buffer2, buffer);
-	// tokenize command's arguments
+	// tokenize command's arguments and retrieve just the command
 	char * p = strtok(buffer2, " ");
-	int arg_cnt = 0;
-	while (p != NULL) {
-		args[arg_cnt++] = p;
-		if (arg_cnt == args_count_max - 1) {
-			break;
-		}
-		p = strtok(NULL, " ");
-	}
-	args[arg_cnt] = NULL;
-	return args[0];
+	return p;
 }
 
 bool valid_command(char cmd[]){
-    printf("%s", cmd);
     return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") == 0|| strcmp(cmd, "resume") == 0|| strcmp(cmd, "stop") == 0;
 }
 /******************************************************************************
@@ -157,10 +168,8 @@ bool valid_command(char cmd[]){
 void run_terminal(int writing_pipe){
     char buffer[80];
 	// NULL-terminated array
-	char * args[10];
-	const int args_count = sizeof(args) / sizeof(*args);
 	while (true) {
-		char * const cmd = get_input(buffer, args, args_count);
+		char * const cmd = get_input(buffer);
 		
 		if (strcmp(cmd, "exit")==0) {
 			perform_exit();
@@ -179,9 +188,22 @@ void run_terminal(int writing_pipe){
 
 void run_process_manager(int reading_pipe){
     char buffer[100];
+    
 	while (read(reading_pipe, buffer, 100) > 0) {
 		buffer[99] = '\0';
 		printf("child > %s command received\n", buffer);
+        char * args[10];
+	    const int args_count = sizeof(args) / sizeof(*args);
+        process_input(buffer, args, args_count);
+        char * cmd = args[0];
+        if (strcmp(cmd, "kill")==0) {
+			perform_kill(&args[1]);
+		} else if (strcmp(cmd,"run")==0) {
+			perform_run(&args[1]);
+		} else if (strcmp(cmd, "list")==0) {
+			perform_list();
+        }
+
 	}
 	fprintf(stderr, "child > unable to read\n");
 }
