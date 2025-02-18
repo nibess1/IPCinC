@@ -32,13 +32,17 @@ typedef struct process_record {
 
 enum {
 	MAX_PROCESSES = 99,
-    MAX_QUEUE = 96,
-    MAX_RUNNING = 3
+    MAX_RUNNING = 3,
+	MAX_QUEUE = MAX_PROCESSES - MAX_RUNNING
+
 };
 
 process_record process_records[MAX_PROCESSES] = {-1, -1, UNUSED, NULL};
 process_record* running_processes[MAX_RUNNING] = {NULL};
 process_record* process_queue[MAX_QUEUE] = {NULL};
+
+int add_index = 0;
+int rem_index = 0;
 
 void perform_run(char* args[]) {
 	int index = -1;
@@ -79,6 +83,23 @@ void perform_run(char* args[]) {
 	p->pid = pid;
 	p->status = RUNNING;
 	printf("[%d] %d created\n", index, p->pid);
+}
+
+void add_to_queue(process_record* pr){
+	if(process_queue[add_index] != NULL){
+		printf("Queue is full! Please terminate some processes or wait for them to end.");
+	}
+	process_queue[add_index] = pr;
+	add_index = (add_index + 1) % MAX_QUEUE; 
+}
+
+process_record* remove_from_queue(){
+	if(process_queue[rem_index] == NULL){
+		printf("No elements in queue! If you got here, I probably wrote buggy code!");
+	}
+	process_record* pr = process_queue[rem_index];
+	rem_index = (rem_index + 1) % MAX_QUEUE;
+	return pr;
 }
 
 void perform_kill(char* args[]) {
