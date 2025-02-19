@@ -52,7 +52,7 @@ int rem_index = 0;
  * Initialising
  ******************************************************************************/
 
-void trigger_run(process_record *p);
+void trigger_run(process_record *p, int running_index);
 
 void init_processes(void) {
 	for (int i = 0; i < MAX_PROCESSES; i++)
@@ -117,16 +117,16 @@ void perform_run(char *args[])
 	// if unable to find a slot, add to process queue
 	if (index < 0)
 	{
-		printf("no running process slots available.\n");
+		printf("no running process slots available. Adding your request to the queue.\n");
 		add_to_queue(&process_records[proc_index]);
 		return;
 	}
 	// else: add to running queue after executing the command
-	trigger_run(&process_records[proc_index]);
+	trigger_run(&process_records[proc_index], index);
 	proc_index++;
 }
 
-void trigger_run(process_record *p)
+void trigger_run(process_record *p, int running_index)
 {
 	pid_t pid = fork();
 	if (pid < 0)
@@ -146,6 +146,7 @@ void trigger_run(process_record *p)
 	}
 	p->pid = pid;
 	p->status = RUNNING;
+	running_processes[running_index] = p;
 	printf("[%d] %d currently running\n", p->index, p->pid);
 }
 
