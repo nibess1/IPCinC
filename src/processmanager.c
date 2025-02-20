@@ -54,25 +54,27 @@ int rem_index = 0;
 
 void trigger_run(process_record *p, int running_index);
 
-void init_processes(void) {
+void init_processes(void)
+{
 	for (int i = 0; i < MAX_PROCESSES; i++)
 	{
 		process_records[i].pid = -1;
 		process_records[i].status = UNUSED;
 		process_records[i].index = -1;
-		for (int j = 0; j < 10; j++) {
+		for (int j = 0; j < 10; j++)
+		{
 			process_records[i].args[j] = NULL;
 		}
 	}
 }
- 
 
 process_record create_process(char *args[], int index)
 {
 	process_record pr;
 	pr.pid = -1;
 	pr.index = index;
-	for(int i = 0; i < 10 && args[i] != NULL; i++){
+	for (int i = 0; i < 10 && args[i] != NULL; i++)
+	{
 		pr.args[i] = args[i];
 	}
 	pr.status = READY;
@@ -121,13 +123,26 @@ void perform_run(char *args[])
 		add_to_queue(&process_records[proc_index]);
 		return;
 	}
-	// else: add to running queue after executing the command
+
 	trigger_run(&process_records[proc_index], index);
 	proc_index++;
 }
 
 void trigger_run(process_record *p, int running_index)
 {
+
+	int len_args = 0;
+	for (int i = 0; i < 10 && p->args[i] != NULL; i++) {
+		len_args++;
+	}
+	char *args[len_args];
+
+	for (int i = 0; i < len_args; i++)
+	{
+		args[i] = p->args[i];
+	}
+	args[len_args - 1] = NULL;
+
 	pid_t pid = fork();
 	if (pid < 0)
 	{
@@ -136,11 +151,11 @@ void trigger_run(process_record *p, int running_index)
 	}
 	if (pid == 0)
 	{
-		const size_t len = strlen(p->args[0]);
+		const size_t len = strlen(args[0]);
 		char exec[len + 3];
 		strcpy(exec, "./");
-		strcat(exec, p->args[0]);
-		execvp(exec, p->args);
+		strcat(exec, args[0]);
+		execvp(exec, args);
 		// Unreachable code unless execution failed.
 		exit(EXIT_FAILURE);
 	}
@@ -229,7 +244,7 @@ char *get_input(char *buffer)
 {
 	// capture a command
 	printf("\x1B[34m"
-		   "cs205"
+		   "process manager 205"
 		   "\x1B[0m"
 		   "$ ");
 	fgets(buffer, 79, stdin);
@@ -256,34 +271,33 @@ bool valid_command(char cmd[])
 /******************************************************************************
  * Entry point
  ******************************************************************************/
-
 void run_terminal(int writing_pipe)
 {
-	char buffer[80];
-	// NULL-terminated array
-	while (true)
-	{
-		char *const cmd = get_input(buffer);
+    char buffer[80];
 
-		if (strcmp(cmd, "exit") == 0)
-		{
-			perform_exit();
-			break;
-		}
-		else if (valid_command(cmd))
-		{
-			if (write(writing_pipe, buffer, 80) <= 0)
-			{
-				printf("unable to write");
-				break;
-			};
-		}
-		else
-		{
-			printf("invalid command. Valid commands are run, stop, resume, kill, list and exit\n");
-		}
-	}
-	return;
+    while (true)
+    {
+        char *const cmd = get_input(buffer);
+
+        if (strcmp(cmd, "exit") == 0)
+        {
+            perform_exit();
+            close(writing_pipe);  // Close pipe on exit
+            break;
+        }
+        else if (valid_command(cmd))
+        {
+            if (write(writing_pipe, buffer, 80) <= 0)
+            {
+                printf("unable to write\n");
+                break;
+            }
+        }
+        else
+        {
+            printf("Invalid command. Valid commands: run, stop, resume, kill, list, exit\n");
+        }
+    }
 }
 
 void run_process_manager(int reading_pipe)
@@ -315,7 +329,7 @@ void run_process_manager(int reading_pipe)
 }
 
 int main(void)
-{	
+{
 	init_processes();
 	int p[2];
 	if (pipe(p))
