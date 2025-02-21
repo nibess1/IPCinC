@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -6,7 +7,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 /******************************************************************************
  * Types
@@ -37,7 +37,7 @@ enum {
     MAX_QUEUE = MAX_PROCESSES - MAX_RUNNING
 };
 
-process_record* process_records[MAX_PROCESSES] = {NULL};
+process_record* process_records[MAX_PROCESSES] = { NULL };
 process_record* running_processes[MAX_RUNNING] = { NULL };
 process_record* process_queue[MAX_QUEUE] = { NULL };
 
@@ -52,12 +52,9 @@ int rem_index = 0;
 void trigger_run(process_record* p, int running_index);
 void trigger_kill(pid_t pid);
 
-
 process_record* create_process(char* args[], int index)
 {
-    printf("first: %s\n", args[0]);
 
-    // ✅ Allocate memory for `process_record`
     process_record* pr = (process_record*)malloc(sizeof(process_record));
     if (pr == NULL) {
         printf("Memory allocation failed!\n");
@@ -68,26 +65,17 @@ process_record* create_process(char* args[], int index)
     pr->index = index;
     pr->status = READY;
 
-    // ✅ Allocate and copy arguments
     int i;
     for (i = 0; i < 10 && args[i] != NULL; i++) {
-        pr->args[i] = strdup(args[i]);  // ✅ Properly copy the string
+        pr->args[i] = strdup(args[i]);
     }
 
-    // ✅ Ensure remaining slots are NULL
     for (; i < 10; i++) {
         pr->args[i] = NULL;
     }
 
-    // ✅ Debug print
-    printf("\nFinal args array:\n");
-    for (int j = 0; j < 10; j++) {
-        printf("createProc:%s|\n", pr->args[j]);
-    }
-
-    return pr;  // ✅ Return pointer to allocated process_record
+    return pr;
 }
-
 
 void add_to_queue(process_record* pr)
 {
@@ -112,9 +100,9 @@ process_record* remove_from_queue(void)
 
 void process_tracker(void)
 {
-	sleep(1);
+    sleep(1);
     for (int i = 0; i < MAX_RUNNING; i++) {
-        if (running_processes[i] == NULL) { 
+        if (running_processes[i] == NULL) {
             continue;
         }
 
@@ -136,7 +124,6 @@ void process_tracker(void)
     }
 }
 
-
 void perform_run(char* args[])
 {
     // find a slot to run in
@@ -157,12 +144,6 @@ void perform_run(char* args[])
         return;
     }
     // else: run the commmand
-	// int j = 0;
-	// while(process_records[proc_index].args[j] != NULL){
-	// 	printf("%s|\n", process_records[proc_index].args[j]);
-	// 	j++;
-	// }
-	// printf("%s|\n", process_records[proc_index].args[j]);
     trigger_run(process_records[proc_index], index);
     proc_index++;
 }
@@ -192,11 +173,12 @@ void trigger_run(process_record* p, int running_index)
 void perform_kill(char* args[])
 {
     const pid_t pid = atoi(args[0]);
-	trigger_kill(pid);
+    trigger_kill(pid);
 }
 
-void trigger_kill(pid_t pid){
-	if (pid <= 0) {
+void trigger_kill(pid_t pid)
+{
+    if (pid <= 0) {
         printf("The process ID must be a positive integer.\n");
         return;
     }
@@ -247,20 +229,26 @@ void perform_list(void)
 void free_process(process_record* pr)
 {
     for (int i = 0; i < 10 && pr->args[i] != NULL; i++) {
-        free(pr->args[i]);  
+        free(pr->args[i]);
     }
-    free(pr); 
+    free(pr);
 }
 
 void perform_exit(void)
 {
-	for(int i = 0; i < MAX_PROCESSES; i++){
-		if(process_records[i] != NULL){
-			//terminate process first then free process
-			trigger_kill(process_records[i]->pid);
-			free_process(process_records[i]);
-		}
-	}
+    //terminate running processes
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] != NULL) {
+            trigger_kill(running_processes[i]->pid);
+        }
+    }
+    //free running processes
+    for(int i = 0; i < MAX_PROCESSES; i++){
+        if(process_records[i] != NULL){
+            free_process(process_records[i]);
+        }
+    }
+
     printf("bye!\n");
 }
 
@@ -302,8 +290,8 @@ char* get_input(char* buffer)
     strcpy(buffer2, buffer);
     // tokenize command's arguments and retrieve just the command
     char* p = strtok(buffer2, " ");
-	char* result = (char *)malloc(21 * sizeof(char));
-	strcpy(result, p);
+    char* result = (char*)malloc(21 * sizeof(char));
+    strcpy(result, p);
     return result;
 }
 
@@ -335,19 +323,18 @@ void run_terminal(int writing_pipe)
                 "kill, list "
                 "and exit\n");
         }
-		free(cmd);
+        free(cmd);
     }
     return;
 }
 
 void run_process_manager(int reading_pipe)
 {
-    
+
     while (true) {
-		char buffer[100];
+        char buffer[100];
         if (read(reading_pipe, buffer, 100) > 0) {
             buffer[99] = '\0';
-            printf("child > %s command received\n", buffer);
             char* args[10];
             const int args_count = sizeof(args) / sizeof(*args);
             process_input(buffer, args, args_count);
@@ -358,17 +345,17 @@ void run_process_manager(int reading_pipe)
                 perform_run(&args[1]);
             } else if (strcmp(cmd, "list") == 0) {
                 perform_list();
-            // } else if (strcmp(cmd, "resume") == 0) {
-            //     perform_resume(&args[1]);
-            // } else if (strcmp(cmd, "stop") == 0) {
-            //     perform_stop(&args[1]);
+                // } else if (strcmp(cmd, "resume") == 0) {
+                //     perform_resume(&args[1]);
+                // } else if (strcmp(cmd, "stop") == 0) {
+                //     perform_stop(&args[1]);
             } else if (strcmp(cmd, "exit") == 0) {
                 perform_exit();
                 break;
             }
         }
         // manage processes
-		process_tracker();
+        process_tracker();
     }
     fprintf(stderr, "child > unable to read\n");
 }
