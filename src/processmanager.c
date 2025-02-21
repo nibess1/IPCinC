@@ -196,26 +196,12 @@ void trigger_kill(pid_t pid)
 
 void perform_list(void)
 {
-    // loop through all child processes, display status
     bool anything = false;
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         process_record* const p = process_records[i];
-        switch (p->status) {
-        case RUNNING:
-            printf("[%d] %d created\n", i, p->pid);
+        if (p != NULL) {
+            printf("%d, %d\n", p->pid, p->status);
             anything = true;
-            break;
-        case READY:
-            break;
-        case STOPPED:
-            break;
-        case TERMINATED:
-            printf("[%d] %d killed\n", i, p->pid);
-            anything = true;
-            break;
-        case UNUSED:
-            // Do nothing.
-            break;
         }
     }
     if (!anything) {
@@ -236,15 +222,15 @@ void free_process(process_record* pr)
 
 void perform_exit(void)
 {
-    //terminate running processes
+    // terminate running processes
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] != NULL) {
             trigger_kill(running_processes[i]->pid);
         }
     }
-    //free running processes
-    for(int i = 0; i < MAX_PROCESSES; i++){
-        if(process_records[i] != NULL){
+    // free running processes
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (process_records[i] != NULL) {
             free_process(process_records[i]);
         }
     }
