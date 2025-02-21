@@ -51,6 +51,7 @@ int rem_index = 0;
 
 void trigger_run(process_record* p, int running_index);
 void trigger_kill(pid_t pid);
+void trigger_stop(pid_t pid);
 
 process_record* create_process(char* args[], int index)
 {
@@ -81,11 +82,19 @@ void add_to_queue(process_record* pr)
 {
     if (process_queue[add_index] != NULL) {
         printf(
-            "Queue is full! Please terminate some processes or wait for them to "
-            "end.");
+            "Queue is full! Please increase MAX_PROCESSES\n");
     }
     process_queue[add_index] = pr;
     add_index = (add_index + 1) % MAX_QUEUE;
+}
+
+void add_to_queue_front(process_record* pr)
+{
+    if (process_queue[rem_index] != NULL) {
+        rem_index = (rem_index - 1 < 0) ? MAX_QUEUE : (rem_index - 1);
+    }
+    // if process_queue[rem_index] = NULL, it is the first item added to queue
+    process_queue[rem_index] = pr;
 }
 
 process_record* remove_from_queue(void)
@@ -192,6 +201,33 @@ void trigger_kill(pid_t pid)
         }
     }
     printf("Process %d not found.\n", pid);
+}
+
+void perform_stop(char* args[])
+{
+    const pid_t pid = atoi(args[0]);
+    trigger_stop(pid);
+}
+
+void trigger_stop(pid_t pid)
+{
+    // only a currently running process can be stopped
+    if (pid <= 0) {
+        printf("The process ID must be a positive integer.\n");
+        return;
+    }
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] == NULL) {
+            continue;
+        }
+        if (pid == running_processes[i]->pid) {
+            if (kill(pid, SIGSTOP) != 0) {
+                fprintf(stderr, "Unable to stop process with pid %d\n", pid);
+                perform_exit();
+                return;
+            }
+        }
+    }
 }
 
 void perform_list(void)
