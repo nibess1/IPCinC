@@ -1,48 +1,45 @@
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 /******************************************************************************
  * Types
  ******************************************************************************/
 
-typedef enum process_status
-{
-	RUNNING = 0,
-	READY = 1,
-	STOPPED = 2,
-	TERMINATED = 3,
-	UNUSED = 4
+typedef enum process_status {
+    RUNNING = 0,
+    READY = 1,
+    STOPPED = 2,
+    TERMINATED = 3,
+    UNUSED = 4
 } process_status;
 
-typedef struct process_record
-{
-	pid_t pid;
-	int index;
-	process_status status;
-	char *args[10];
+typedef struct process_record {
+    pid_t pid;
+    int index;
+    process_status status;
+    char* args[10];
 } process_record;
 
 /******************************************************************************
  * Globals
  ******************************************************************************/
 
-enum
-{
-	MAX_PROCESSES = 99,
-	MAX_RUNNING = 3,
-	MAX_QUEUE = MAX_PROCESSES - MAX_RUNNING
-
+enum {
+    MAX_PROCESSES = 99,
+    MAX_RUNNING = 3,
+    MAX_QUEUE = MAX_PROCESSES - MAX_RUNNING
 };
 
-process_record process_records[MAX_PROCESSES];
-process_record *running_processes[MAX_RUNNING] = {NULL};
-process_record *process_queue[MAX_QUEUE] = {NULL};
+process_record* process_records[MAX_PROCESSES] = {NULL};
+process_record* running_processes[MAX_RUNNING] = { NULL };
+process_record* process_queue[MAX_QUEUE] = { NULL };
 
 int proc_index = 0;
 int add_index = 0;
@@ -52,206 +49,267 @@ int rem_index = 0;
  * Initialising
  ******************************************************************************/
 
-void trigger_run(process_record *p, int running_index);
+void trigger_run(process_record* p, int running_index);
+void trigger_kill(pid_t pid);
 
-void init_processes(void) {
-	for (int i = 0; i < MAX_PROCESSES; i++)
-	{
-		process_records[i].pid = -1;
-		process_records[i].status = UNUSED;
-		process_records[i].index = -1;
-		for (int j = 0; j < 10; j++) {
-			process_records[i].args[j] = NULL;
-		}
-	}
-}
- 
 
-process_record create_process(char *args[], int index)
+process_record* create_process(char* args[], int index)
 {
-	process_record pr;
-	pr.pid = -1;
-	pr.index = index;
-	for(int i = 0; i < 10 && args[i] != NULL; i++){
-		pr.args[i] = args[i];
-	}
-	pr.status = READY;
+    printf("first: %s\n", args[0]);
 
-	return pr;
-}
+    // ✅ Allocate memory for `process_record`
+    process_record* pr = (process_record*)malloc(sizeof(process_record));
+    if (pr == NULL) {
+        printf("Memory allocation failed!\n");
+        exit(1);
+    }
 
-void add_to_queue(process_record *pr)
-{
-	if (process_queue[add_index] != NULL)
-	{
-		printf("Queue is full! Please terminate some processes or wait for them to end.");
-	}
-	process_queue[add_index] = pr;
-	add_index = (add_index + 1) % MAX_QUEUE;
-}
+    pr->pid = -1;
+    pr->index = index;
+    pr->status = READY;
 
-process_record *remove_from_queue(void)
-{
-	if (process_queue[rem_index] == NULL)
-	{
-		printf("No elements in queue! If you got here, I probably wrote buggy code!");
-	}
-	process_record *pr = process_queue[rem_index];
-	rem_index = (rem_index + 1) % MAX_QUEUE;
-	return pr;
+    // ✅ Allocate and copy arguments
+    int i;
+    for (i = 0; i < 10 && args[i] != NULL; i++) {
+        pr->args[i] = strdup(args[i]);  // ✅ Properly copy the string
+    }
+
+    // ✅ Ensure remaining slots are NULL
+    for (; i < 10; i++) {
+        pr->args[i] = NULL;
+    }
+
+    // ✅ Debug print
+    printf("\nFinal args array:\n");
+    for (int j = 0; j < 10; j++) {
+        printf("createProc:%s|\n", pr->args[j]);
+    }
+
+    return pr;  // ✅ Return pointer to allocated process_record
 }
 
-void perform_run(char *args[])
+
+void add_to_queue(process_record* pr)
 {
-	// find a slot to run in
-	int index = -1;
-	for (int i = 0; i < MAX_RUNNING; i++)
-	{
-		if (running_processes[i] == NULL)
-		{
-			index = i;
-			break;
-		}
-	}
-	process_records[proc_index] = create_process(args, proc_index);
-	// if unable to find a slot, add to process queue
-	if (index < 0)
-	{
-		printf("no running process slots available. Adding your request to the queue.\n");
-		add_to_queue(&process_records[proc_index]);
-		return;
-	}
-	// else: add to running queue after executing the command
-	trigger_run(&process_records[proc_index], index);
-	proc_index++;
+    if (process_queue[add_index] != NULL) {
+        printf(
+            "Queue is full! Please terminate some processes or wait for them to "
+            "end.");
+    }
+    process_queue[add_index] = pr;
+    add_index = (add_index + 1) % MAX_QUEUE;
 }
 
-void trigger_run(process_record *p, int running_index)
+process_record* remove_from_queue(void)
 {
-	pid_t pid = fork();
-	if (pid < 0)
-	{
-		fprintf(stderr, "fork failed\n");
-		return;
-	}
-	if (pid == 0)
-	{
-		const size_t len = strlen(p->args[0]);
-		char exec[len + 3];
-		strcpy(exec, "./");
-		strcat(exec, p->args[0]);
-		execvp(exec, p->args);
-		// Unreachable code unless execution failed.
-		exit(EXIT_FAILURE);
-	}
-	p->pid = pid;
-	p->status = RUNNING;
-	running_processes[running_index] = p;
-	printf("[%d] %d currently running\n", p->index, p->pid);
+    if (process_queue[rem_index] == NULL) {
+        return NULL;
+    }
+    process_record* pr = process_queue[rem_index];
+    rem_index = (rem_index + 1) % MAX_QUEUE;
+    return pr;
 }
 
-void perform_kill(char *args[])
+void process_tracker(void)
 {
-	const pid_t pid = atoi(args[0]);
-	if (pid <= 0)
-	{
-		printf("The process ID must be a positive integer.\n");
-		return;
-	}
-	for (int i = 0; i < MAX_PROCESSES; ++i)
-	{
-		process_record *const p = &process_records[i];
-		if ((p->pid == pid) && (p->status == RUNNING))
-		{
-			kill(p->pid, SIGTERM);
-			printf("[%d] %d killed\n", i, p->pid);
-			p->status = TERMINATED;
-			return;
-		}
-	}
-	printf("Process %d not found.\n", pid);
+	sleep(1);
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] == NULL) { 
+            continue;
+        }
+
+        pid_t pid = running_processes[i]->pid;
+        if (pid > 0) {
+            int status;
+            if (waitpid(pid, &status, WNOHANG) == pid) {
+                printf("parent> Child %d exited with code %d.\n", pid, status);
+                running_processes[i]->status = TERMINATED;
+                running_processes[i] = NULL;
+
+                // Start next process in the queue
+                process_record* next = remove_from_queue();
+                if (next != NULL) {
+                    trigger_run(next, i);
+                }
+            }
+        }
+    }
+}
+
+
+void perform_run(char* args[])
+{
+    // find a slot to run in
+    int index = -1;
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] == NULL) {
+            index = i;
+            break;
+        }
+    }
+    process_records[proc_index] = create_process(args, proc_index);
+    // if unable to find a slot, add to process queue
+    if (index < 0) {
+        printf(
+            "no running process slots available. Adding your request to the "
+            "queue.\n");
+        add_to_queue(process_records[proc_index]);
+        return;
+    }
+    // else: run the commmand
+	// int j = 0;
+	// while(process_records[proc_index].args[j] != NULL){
+	// 	printf("%s|\n", process_records[proc_index].args[j]);
+	// 	j++;
+	// }
+	// printf("%s|\n", process_records[proc_index].args[j]);
+    trigger_run(process_records[proc_index], index);
+    proc_index++;
+}
+
+void trigger_run(process_record* p, int running_index)
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "fork failed\n");
+        return;
+    }
+    if (pid == 0) {
+        const size_t len = strlen(p->args[0]);
+        char exec[len + 3];
+        strcpy(exec, "./");
+        strcat(exec, p->args[0]);
+        execvp(exec, p->args);
+        // Unreachable code unless execution failed.
+        exit(EXIT_FAILURE);
+    }
+    p->pid = pid;
+    p->status = RUNNING;
+    running_processes[running_index] = p;
+    printf("[%d] %d currently running\n", p->index, p->pid);
+}
+
+void perform_kill(char* args[])
+{
+    const pid_t pid = atoi(args[0]);
+	trigger_kill(pid);
+}
+
+void trigger_kill(pid_t pid){
+	if (pid <= 0) {
+        printf("The process ID must be a positive integer.\n");
+        return;
+    }
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        process_record* const p = process_records[i];
+        if ((p->pid == pid) && (p->status == RUNNING)) {
+            kill(p->pid, SIGTERM);
+            printf("[%d] %d killed\n", i, p->pid);
+            p->status = TERMINATED;
+            return;
+        }
+    }
+    printf("Process %d not found.\n", pid);
 }
 
 void perform_list(void)
 {
-	// loop through all child processes, display status
-	bool anything = false;
-	for (int i = 0; i < MAX_PROCESSES; ++i)
-	{
-		process_record *const p = &process_records[i];
-		switch (p->status)
-		{
-		case RUNNING:
-			printf("[%d] %d created\n", i, p->pid);
-			anything = true;
-			break;
-		case READY:
-			break;
-		case STOPPED:
-			break;
-		case TERMINATED:
-			printf("[%d] %d killed\n", i, p->pid);
-			anything = true;
-			break;
-		case UNUSED:
-			// Do nothing.
-			break;
-		}
-	}
-	if (!anything)
-	{
-		printf("No processes to list.\n");
-	}
+    // loop through all child processes, display status
+    bool anything = false;
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        process_record* const p = process_records[i];
+        switch (p->status) {
+        case RUNNING:
+            printf("[%d] %d created\n", i, p->pid);
+            anything = true;
+            break;
+        case READY:
+            break;
+        case STOPPED:
+            break;
+        case TERMINATED:
+            printf("[%d] %d killed\n", i, p->pid);
+            anything = true;
+            break;
+        case UNUSED:
+            // Do nothing.
+            break;
+        }
+    }
+    if (!anything) {
+        printf("No processes to list.\n");
+    }
+}
+
+// void perform_stop(char* args[]) { }
+
+// void perform_resume(char* args[]) { }
+void free_process(process_record* pr)
+{
+    for (int i = 0; i < 10 && pr->args[i] != NULL; i++) {
+        free(pr->args[i]);  
+    }
+    free(pr); 
 }
 
 void perform_exit(void)
 {
-	printf("bye!\n");
-}
-
-void process_input(char *buffer, char *args[], int args_count_max)
-{
-	char *p = strtok(buffer, " ");
-	int arg_cnt = 0;
-	while (p != NULL)
-	{
-		args[arg_cnt++] = p;
-		if (arg_cnt == args_count_max - 1)
-		{
-			break;
-		}
-		p = strtok(NULL, " ");
-	}
-	args[arg_cnt] = NULL;
-}
-
-char *get_input(char *buffer)
-{
-	// capture a command
-	printf("\x1B[34m"
-		   "cs205"
-		   "\x1B[0m"
-		   "$ ");
-	fgets(buffer, 79, stdin);
-	for (char *c = buffer; *c != '\0'; ++c)
-	{
-		if ((*c == '\r') || (*c == '\n'))
-		{
-			*c = '\0';
-			break;
+	for(int i = 0; i < MAX_PROCESSES; i++){
+		if(process_records[i] != NULL){
+			//terminate process first then free process
+			trigger_kill(process_records[i]->pid);
+			free_process(process_records[i]);
 		}
 	}
-	strcat(buffer, " ");
-	char buffer2[80];
-	strcpy(buffer2, buffer);
-	// tokenize command's arguments and retrieve just the command
-	char *p = strtok(buffer2, " ");
-	return p;
+    printf("bye!\n");
+}
+
+/******************************************************************************
+ * Input helpers
+ ******************************************************************************/
+
+void process_input(char* buffer, char* args[], int args_count_max)
+{
+    char* p = strtok(buffer, " ");
+    int arg_cnt = 0;
+    while (p != NULL) {
+        args[arg_cnt++] = p;
+        if (arg_cnt == args_count_max - 1) {
+            break;
+        }
+        p = strtok(NULL, " ");
+    }
+    args[arg_cnt] = NULL;
+}
+
+char* get_input(char* buffer)
+{
+    // capture a command
+    printf(
+        "\x1B[34m"
+        "cs205"
+        "\x1B[0m"
+        "$ ");
+    fgets(buffer, 79, stdin);
+    for (char* c = buffer; *c != '\0'; ++c) {
+        if ((*c == '\r') || (*c == '\n')) {
+            *c = '\0';
+            break;
+        }
+    }
+    strcat(buffer, " ");
+    char buffer2[80];
+    strcpy(buffer2, buffer);
+    // tokenize command's arguments and retrieve just the command
+    char* p = strtok(buffer2, " ");
+	char* result = (char *)malloc(21 * sizeof(char));
+	strcpy(result, p);
+    return result;
 }
 
 bool valid_command(char cmd[])
 {
-	return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") == 0 || strcmp(cmd, "resume") == 0 || strcmp(cmd, "stop") == 0;
+    return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") == 0 || strcmp(cmd, "resume") == 0 || strcmp(cmd, "stop") == 0 || strcmp(cmd, "exit") == 0;
 }
 /******************************************************************************
  * Entry point
@@ -259,94 +317,91 @@ bool valid_command(char cmd[])
 
 void run_terminal(int writing_pipe)
 {
-	char buffer[80];
-	// NULL-terminated array
-	while (true)
-	{
-		char *const cmd = get_input(buffer);
-
-		if (strcmp(cmd, "exit") == 0)
-		{
-			perform_exit();
-			break;
-		}
-		else if (valid_command(cmd))
-		{
-			if (write(writing_pipe, buffer, 80) <= 0)
-			{
-				printf("unable to write");
-				break;
-			};
-		}
-		else
-		{
-			printf("invalid command. Valid commands are run, stop, resume, kill, list and exit\n");
-		}
-	}
-	return;
+    char buffer[80];
+    // NULL-terminated array
+    while (true) {
+        char* cmd = get_input(buffer);
+        if (valid_command(cmd)) {
+            if (write(writing_pipe, buffer, 80) <= 0) {
+                printf("unable to write");
+                break;
+            }
+            if (strcmp(cmd, "exit") == 0) {
+                break;
+            }
+        } else {
+            printf(
+                "invalid command. Valid commands are run, stop, resume, "
+                "kill, list "
+                "and exit\n");
+        }
+		free(cmd);
+    }
+    return;
 }
 
 void run_process_manager(int reading_pipe)
 {
-	char buffer[100];
-
-	while (read(reading_pipe, buffer, 100) > 0)
-	{
-		buffer[99] = '\0';
-		printf("child > %s command received\n", buffer);
-		char *args[10];
-		const int args_count = sizeof(args) / sizeof(*args);
-		process_input(buffer, args, args_count);
-		char *cmd = args[0];
-		if (strcmp(cmd, "kill") == 0)
-		{
-			perform_kill(&args[1]);
-		}
-		else if (strcmp(cmd, "run") == 0)
-		{
-			perform_run(&args[1]);
-		}
-		else if (strcmp(cmd, "list") == 0)
-		{
-			perform_list();
-		}
-	}
-	fprintf(stderr, "child > unable to read\n");
+    
+    while (true) {
+		char buffer[100];
+        if (read(reading_pipe, buffer, 100) > 0) {
+            buffer[99] = '\0';
+            printf("child > %s command received\n", buffer);
+            char* args[10];
+            const int args_count = sizeof(args) / sizeof(*args);
+            process_input(buffer, args, args_count);
+            char* cmd = args[0];
+            if (strcmp(cmd, "kill") == 0) {
+                perform_kill(&args[1]);
+            } else if (strcmp(cmd, "run") == 0) {
+                perform_run(&args[1]);
+            } else if (strcmp(cmd, "list") == 0) {
+                perform_list();
+            // } else if (strcmp(cmd, "resume") == 0) {
+            //     perform_resume(&args[1]);
+            // } else if (strcmp(cmd, "stop") == 0) {
+            //     perform_stop(&args[1]);
+            } else if (strcmp(cmd, "exit") == 0) {
+                perform_exit();
+                break;
+            }
+        }
+        // manage processes
+		process_tracker();
+    }
+    fprintf(stderr, "child > unable to read\n");
 }
 
 int main(void)
-{	
-	init_processes();
-	int p[2];
-	if (pipe(p))
-	{
-		return EXIT_FAILURE;
-	}
-	int reading_pipe = p[0];
-	int writing_pipe = p[1];
+{
+    int p[2];
+    if (pipe(p)) {
+        return EXIT_FAILURE;
+    }
+    int reading_pipe = p[0];
+    int writing_pipe = p[1];
+    fcntl(p[0], F_SETFL, O_NONBLOCK);
+    fcntl(p[1], F_SETFL, O_NONBLOCK);
 
-	// create a pipe for the parent process (terminal) to send information (buffer data) to child process (process manager)
-	const pid_t child_pid = fork();
-	if (child_pid < 0)
-	{
-		// Error
-		fprintf(stderr, "fork failed\n");
-		return EXIT_FAILURE;
-	}
-	else if (child_pid != 0)
-	{
-		// Parent
-		close(reading_pipe);
-		run_terminal(writing_pipe);
-		close(writing_pipe);
-		return EXIT_SUCCESS;
-	}
-	else
-	{
-		// Child
-		close(writing_pipe);
-		run_process_manager(reading_pipe);
-		close(reading_pipe);
-		return EXIT_SUCCESS;
-	}
+    // create a pipe for the parent process (terminal) to send information
+    // (buffer data) to child process (process manager)
+    const pid_t child_pid = fork();
+    if (child_pid < 0) {
+        // Error
+        fprintf(stderr, "fork failed\n");
+        return EXIT_FAILURE;
+    } else if (child_pid != 0) {
+        // Parent
+        close(reading_pipe);
+        run_terminal(writing_pipe);
+        close(writing_pipe);
+        return EXIT_SUCCESS;
+    } else {
+        // Child
+        close(writing_pipe);
+        run_process_manager(reading_pipe);
+        close(reading_pipe);
+        return EXIT_SUCCESS;
+    }
 }
