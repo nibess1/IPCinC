@@ -226,6 +226,12 @@ void trigger_stop(pid_t pid)
                 perform_exit();
                 return;
             }
+            // 1. modify current process record
+            running_processes[i]->status = STOPPED;
+            // 2. remove the next process in queue
+            process_record* pr = remove_from_queue();
+            // 3. start the next process
+            trigger_run(pr, i);
         }
     }
 }
