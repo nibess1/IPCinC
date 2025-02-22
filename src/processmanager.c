@@ -39,7 +39,7 @@ enum {
 process_record* process_records[MAX_PROCESSES] = { NULL };
 process_record* running_processes[MAX_RUNNING] = { NULL };
 process_record* process_queue[MAX_QUEUE] = { NULL };
-int latest_running[MAX_RUNNING] = { -1 , -1, -1};
+int latest_running[MAX_RUNNING] = { -1, -1, -1 };
 
 int proc_index = 0;
 int add_index = 0;
@@ -51,21 +51,6 @@ int rem_index = 0;
 
 void trigger_kill(process_record* p);
 void perform_exit(void);
-
-void print_process_priorities(void)
-{
-    printf("\n📌 Current Running Processes & Priorities:\n");
-    for (int i = 0; i < MAX_RUNNING; i++) {
-        if (running_processes[i] != NULL) {
-            printf("Slot %d | PID: %d | Priority: %d\n",
-                i, running_processes[i]->pid, latest_running[i]);
-        } else {
-            printf("Slot %d | (empty)\n", i);
-        }
-    }
-    printf("------------------------------------------\n");
-    fflush(stdout);
-}
 
 // priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
 void priority_manager(int stoppedIndex)
@@ -99,7 +84,6 @@ int priority_allocater(void)
     return -1;
 }
 
-
 int lowest_priority_index(void)
 {
     // there will no process with a lower priority than MAX_RUNNING
@@ -127,7 +111,7 @@ void add_to_queue(process_record* pr)
 void add_to_queue_front(process_record* pr)
 {
     if (process_queue[rem_index] != NULL) {
-        rem_index = (rem_index - 1 < 0) ? MAX_QUEUE : (rem_index - 1);
+        rem_index = (rem_index - 1 < 0) ? MAX_QUEUE - 1 : (rem_index - 1);
     }
     // if process_queue[rem_index] = NULL, it is the first item added to queue
     process_queue[rem_index] = pr;
@@ -139,6 +123,7 @@ process_record* remove_from_queue(void)
         return NULL;
     }
     process_record* pr = process_queue[rem_index];
+    process_queue[rem_index] = NULL;
     rem_index = (rem_index + 1) % MAX_QUEUE;
     return pr;
 }
@@ -219,7 +204,6 @@ void perform_run(char* args[])
         p->status = RUNNING;
         running_processes[running_index] = p;
         latest_running[running_index] = priority_allocater();
-        print_process_priorities();
         //        printf("[%d] %d currently running\n", p->index, p->pid);
     } else {
         p->status = READY;
@@ -327,7 +311,7 @@ void perform_resume(char* args[])
         return;
     }
     if (pr->status == RUNNING) {
-        printf("Process, %d is already running\n", pid);
+        printf("Process %d is already running\n", pid);
         return;
     }
     // find available running slot
@@ -371,23 +355,38 @@ void perform_list(void)
         printf("No processes to list.\n");
     }
 }
-
 void perform_exit(void)
 {
-    // terminate running processes
-    for (int i = 0; i < MAX_RUNNING; i++) {
-        if (running_processes[i] != NULL) {
-            trigger_kill(running_processes[i]);
-        }
-    }
-    // free running processes
+    printf("Exiting... Terminating all processes.\n");
+    fflush(stdout);
+
+    // Loop through all processes in process_records
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_records[i] != NULL) {
+            pid_t pid = process_records[i]->pid;
+
+            // If process is stopped, resume it first
+            if (process_records[i]->status == STOPPED) {
+                printf("Resuming stopped process %d before termination.\n", pid);
+                kill(pid, SIGCONT);
+                usleep(50000); // Ensure process is resumed before killing
+            }
+            // Check if process is still alive before killing
+            if (kill(pid, 0) == 0) {
+                kill(pid, SIGTERM);
+                printf("Killing process %d.\n", pid);
+            } else {
+                printf("Process %d already terminated, skipping.\n", pid);
+            }
+
+            // Free memory for this process
             free(process_records[i]);
+            process_records[i] = NULL;
         }
     }
 
-    printf("bye!\n");
+    printf("All processes terminated. Goodbye!\n");
+    exit(0);
 }
 
 /******************************************************************************
@@ -437,6 +436,7 @@ bool valid_command(char cmd[])
 {
     return strcmp(cmd, "kill") == 0 || strcmp(cmd, "run") == 0 || strcmp(cmd, "list") == 0 || strcmp(cmd, "resume") == 0 || strcmp(cmd, "stop") == 0 || strcmp(cmd, "exit") == 0;
 }
+
 /******************************************************************************
  * Entry point
  ******************************************************************************/
@@ -452,6 +452,8 @@ void run_terminal(int writing_pipe)
                 break;
             }
             if (strcmp(cmd, "exit") == 0) {
+                sleep(5);
+                free(cmd);
                 break;
             }
         } else {
@@ -467,7 +469,7 @@ void run_terminal(int writing_pipe)
 
 void run_process_manager(int reading_pipe)
 {
-    print_process_priorities();
+
     while (true) {
         char buffer[100];
         ssize_t bytes_read = read(reading_pipe, buffer, 100);
@@ -496,9 +498,9 @@ void run_process_manager(int reading_pipe)
             fflush(stdout);
         }
 
-        process_tracker(); // ✅ Run process tracker continuously
+        process_tracker();
 
-        usleep(100000); // ✅ Wait 100ms before checking again (prevents CPU overload)
+        usleep(100000);
     }
 }
 
