@@ -46,7 +46,7 @@ int add_index = 0;
 int rem_index = 0;
 
 /******************************************************************************
- * Initialising
+ * Declarations
  ******************************************************************************/
 
 void trigger_kill(process_record* p);
@@ -366,6 +366,7 @@ void perform_exit(void)
             pid_t pid = process_records[i]->pid;
 
             // If process is stopped, resume it first
+            printf("[%d]" , i);
             if (process_records[i]->status == STOPPED) {
                 printf("Resuming stopped process %d before termination.\n", pid);
                 kill(pid, SIGCONT);
