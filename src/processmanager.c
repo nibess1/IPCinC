@@ -50,7 +50,7 @@ int rem_index = 0;
  ******************************************************************************/
 
 void trigger_kill(pid_t pid);
-void trigger_stop(process_record* pr);
+void trigger_resume(process_record* pr);
 
 // priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
 void priority_manager(int stoppedIndex)
@@ -189,26 +189,39 @@ void perform_run(char* args[])
         exit(EXIT_FAILURE);
     }
 
-    p->pid = pid;
-    p->status = RUNNING;
-    p->index = p_idx;
-    running_processes[running_index] = p;
-    process_records[p_idx] = p;
-    printf("[%d] %d currently running\n", p->index, p->pid);
+    if(running_index != -1){
+        p->pid = pid;
+        p->index = p_idx;
+        trigger_resume(p);
+        running_processes[running_index] = p;
+        process_records[p_idx] = p;
+//        printf("[%d] %d currently running\n", p->index, p->pid);
+    } else {
+        add_to_queue(p);
+//      printf("added to queue");
+    }
+    
 }
 
 void perform_kill(char* args[])
 {
     const pid_t pid = atoi(args[0]);
+    if (pid <= 0) {
+        printf("The process ID must be a positive integer.\n");
+        return;
+    }
+    for (int i = 0; i < MAX_PROCESSES; ++i) {
+        process_record* const p = process_records[i];
+        if(p != NULL && p->pid == pid && p->status != TERMINATED){
+            
+        }
+    }
     trigger_kill(pid);
 }
 
 void trigger_kill(pid_t pid)
 {
-    if (pid <= 0) {
-        printf("The process ID must be a positive integer.\n");
-        return;
-    }
+    
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         process_record* const p = process_records[i];
         if ((p->pid == pid) && (p->status != TERMINATED)) {
