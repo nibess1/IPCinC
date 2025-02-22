@@ -40,6 +40,7 @@ enum {
 process_record* process_records[MAX_PROCESSES] = { NULL };
 process_record* running_processes[MAX_RUNNING] = { NULL };
 process_record* process_queue[MAX_QUEUE] = { NULL };
+int latest_running[MAX_RUNNING] = { -1 };
 
 int proc_index = 0;
 int add_index = 0;
@@ -52,6 +53,35 @@ int rem_index = 0;
 void trigger_run(process_record* p, int running_index);
 void trigger_kill(pid_t pid);
 void trigger_stop(pid_t pid);
+
+// priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
+void priority_manager(int stoppedIndex)
+{
+    int current_priority = latest_running[stoppedIndex];
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if(latest_running[i] > current_priority){
+            latest_running[i]--;
+        }
+    }
+}
+
+// returns a priority to the current task about to be done
+// higher priority is given to earlier tasks
+int priority_allocater(int index)
+{
+    bool tracker[MAX_RUNNING] = { false };
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (latest_running[i] != -1) {
+            tracker[latest_running[i]] = true;
+        }
+    }
+    // tracker will have true for the taken priorities, false for the not taken ones
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (!tracker[i]) {
+            return i;
+        }
+    }
+}
 
 process_record* create_process(char* args[], int index)
 {
@@ -109,7 +139,6 @@ process_record* remove_from_queue(void)
 
 void process_tracker(void)
 {
-    sleep(1);
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] == NULL) {
             continue;
@@ -231,13 +260,22 @@ void trigger_stop(pid_t pid)
             // 2. remove the next process in queue
             process_record* pr = remove_from_queue();
             // 3. start the next process if not null
-            if(pr != NULL){
+            if (pr != NULL) {
                 trigger_run(pr, i);
             }
         }
     }
 }
 
+void perform_resume(char* args[])
+{
+    const pid_t pid = atoi(args[0]);
+    trigger_resume(pid);
+}
+
+void trigger_resume(pid_t pid)
+{
+}
 void perform_list(void)
 {
     bool anything = false;
@@ -253,9 +291,6 @@ void perform_list(void)
     }
 }
 
-// void perform_stop(char* args[]) { }
-
-// void perform_resume(char* args[]) { }
 void free_process(process_record* pr)
 {
     for (int i = 0; i < 10 && pr->args[i] != NULL; i++) {
