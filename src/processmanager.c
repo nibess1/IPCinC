@@ -39,18 +39,28 @@ enum {
 process_record* process_records[MAX_PROCESSES] = { NULL };
 process_record* running_processes[MAX_RUNNING] = { NULL };
 process_record* process_queue[MAX_QUEUE] = { NULL };
-int latest_running[MAX_RUNNING] = { -1, -1, -1 };
+int latest_running[MAX_RUNNING];
 
 int proc_index = 0;
 int add_index = 0;
 int rem_index = 0;
 
 /******************************************************************************
- * Declarations
+ * Declarations and initialising
  ******************************************************************************/
 
+void initialise(void)
+{
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        latest_running[i] = -1;
+    }
+}
 void trigger_kill(process_record* p);
 void perform_exit(void);
+void start_next_process(int running_index);
+/******************************************************************************
+ * Queue and priority management
+ ******************************************************************************/
 
 // priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
 void priority_manager(int stoppedIndex)
@@ -128,6 +138,10 @@ process_record* remove_from_queue(void)
     return pr;
 }
 
+/******************************************************************************
+ * Auto-start next process
+ ******************************************************************************/
+
 void process_tracker(void)
 {
     for (int i = 0; i < MAX_RUNNING; i++) {
@@ -145,17 +159,30 @@ void process_tracker(void)
                 priority_manager(i);
 
                 // Start next process in the queue
-                process_record* next = remove_from_queue();
-                if (next != NULL) {
-                    kill(next->pid, SIGCONT);
-                    next->status = RUNNING;
-                    running_processes[i] = next;
-                    latest_running[i] = priority_allocater();
-                }
+                start_next_process(i);
             }
         }
     }
 }
+
+/******************************************************************************
+ * Helper Functions
+ ******************************************************************************/
+
+void start_next_process(int running_index)
+{
+    process_record* next = remove_from_queue();
+    if (next != NULL) {
+        kill(next->pid, SIGCONT);
+        next->status = RUNNING;
+        running_processes[running_index] = next;
+        latest_running[running_index] = priority_allocater();
+    }
+}
+
+/******************************************************************************
+ * Action Functions
+ ******************************************************************************/
 
 void perform_run(char* args[])
 {
@@ -227,13 +254,11 @@ void perform_kill(char* args[])
             break;
         }
     }
-    process_record* next = remove_from_queue();
-    if (next != NULL) {
-        kill(next->pid, SIGCONT);
-        next->status = RUNNING;
-        running_processes[running_index] = next;
-        latest_running[running_index] = priority_allocater();
+    if (running_index == -1) {
+        printf("Unable to locate process with pid %d\n", pid);
+        return;
     }
+    start_next_process(running_index);
 }
 
 void trigger_kill(process_record* p)
@@ -269,7 +294,7 @@ void perform_stop(char* args[])
     }
 
     if (pr == NULL) {
-        printf("Unable to locate process with pid %d", pid);
+        printf("Unable to locate process with pid %d\n", pid);
         return;
     }
     printf("stopping %d\n", pr->pid);
@@ -279,13 +304,7 @@ void perform_stop(char* args[])
     running_processes[running_index] = NULL;
 
     // start next process automatically
-    process_record* next = remove_from_queue();
-    if (next != NULL) {
-        kill(next->pid, SIGCONT);
-        next->status = RUNNING;
-        running_processes[running_index] = next;
-        latest_running[running_index] = priority_allocater();
-    }
+    start_next_process(running_index);
 }
 
 void perform_resume(char* args[])
@@ -307,7 +326,7 @@ void perform_resume(char* args[])
     }
 
     if (pr == NULL) {
-        printf("Unable to locate process with pid %d", pid);
+        printf("Unable to locate process with pid %d\n", pid);
         return;
     }
     if (pr->status == RUNNING) {
@@ -323,7 +342,7 @@ void perform_resume(char* args[])
         }
     }
 
-    // if unable to find slot, free a slot by removing the lastest running process
+    // if unable to find slot, free a slot by removing the lowest priority running process
     if (running_index == -1) {
         int to_stop_idx = lowest_priority_index();
         process_record* to_stop = running_processes[to_stop_idx];
@@ -366,7 +385,7 @@ void perform_exit(void)
             pid_t pid = process_records[i]->pid;
 
             // If process is stopped, resume it first
-            printf("[%d]" , i);
+            printf("[%d]", i);
             if (process_records[i]->status == STOPPED) {
                 printf("Resuming stopped process %d before termination.\n", pid);
                 kill(pid, SIGCONT);
@@ -439,7 +458,7 @@ bool valid_command(char cmd[])
 }
 
 /******************************************************************************
- * Entry point
+ * Process Functions
  ******************************************************************************/
 void run_terminal(int writing_pipe)
 {
@@ -449,7 +468,7 @@ void run_terminal(int writing_pipe)
         char* cmd = get_input(buffer);
         if (valid_command(cmd)) {
             if (write(writing_pipe, buffer, 80) <= 0) {
-                printf("unable to write");
+                printf("unable to write\n");
                 break;
             }
             if (strcmp(cmd, "exit") == 0) {
@@ -470,7 +489,7 @@ void run_terminal(int writing_pipe)
 
 void run_process_manager(int reading_pipe)
 {
-
+    initialise();
     while (true) {
         char buffer[100];
         ssize_t bytes_read = read(reading_pipe, buffer, 100);
@@ -500,10 +519,14 @@ void run_process_manager(int reading_pipe)
         }
 
         process_tracker();
-
+        //sleep to reduce CPU utilisation
         usleep(100000);
     }
 }
+
+/******************************************************************************
+ * Entry point
+ ******************************************************************************/
 
 int main(void)
 {
