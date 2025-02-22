@@ -39,7 +39,7 @@ enum {
 process_record* process_records[MAX_PROCESSES] = { NULL };
 process_record* running_processes[MAX_RUNNING] = { NULL };
 process_record* process_queue[MAX_QUEUE] = { NULL };
-int latest_running[MAX_RUNNING] = { -1 };
+int latest_running[MAX_RUNNING] = { -1 , -1, -1};
 
 int proc_index = 0;
 int add_index = 0;
@@ -49,8 +49,23 @@ int rem_index = 0;
  * Initialising
  ******************************************************************************/
 
-void trigger_kill(pid_t pid);
-void trigger_resume(process_record* pr);
+void trigger_kill(process_record* p);
+void perform_exit(void);
+
+void print_process_priorities(void)
+{
+    printf("\n📌 Current Running Processes & Priorities:\n");
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] != NULL) {
+            printf("Slot %d | PID: %d | Priority: %d\n",
+                i, running_processes[i]->pid, latest_running[i]);
+        } else {
+            printf("Slot %d | (empty)\n", i);
+        }
+    }
+    printf("------------------------------------------\n");
+    fflush(stdout);
+}
 
 // priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
 void priority_manager(int stoppedIndex)
@@ -61,15 +76,17 @@ void priority_manager(int stoppedIndex)
             latest_running[i]--;
         }
     }
+
+    latest_running[stoppedIndex] = -1;
 }
 
 // returns a priority to the current task about to be done
 // higher priority is given to earlier tasks
-int priority_allocater(int index)
+int priority_allocater(void)
 {
     bool tracker[MAX_RUNNING] = { false };
     for (int i = 0; i < MAX_RUNNING; i++) {
-        if (latest_running[i] != -1) {
+        if (latest_running[i] >= 0 && latest_running[i] < MAX_RUNNING) {
             tracker[latest_running[i]] = true;
         }
     }
@@ -79,15 +96,17 @@ int priority_allocater(int index)
             return i;
         }
     }
+    return -1;
 }
 
-int lowest_priority_index()
+
+int lowest_priority_index(void)
 {
     // there will no process with a lower priority than MAX_RUNNING
-    int current_running = MAX_RUNNING;
+    int current_running = -1;
     int lowest_index = -1;
     for (int i = 0; i < MAX_RUNNING; i++) {
-        if (latest_running[i] != -1 && latest_running[i] < current_running) {
+        if (latest_running[i] != -1 && latest_running[i] > current_running) {
             current_running = latest_running[i];
             lowest_index = i;
         }
@@ -138,11 +157,15 @@ void process_tracker(void)
                 printf("parent> Child %d exited with code %d.\n", pid, status);
                 running_processes[i]->status = TERMINATED;
                 running_processes[i] = NULL;
+                priority_manager(i);
 
                 // Start next process in the queue
                 process_record* next = remove_from_queue();
                 if (next != NULL) {
-                    trigger_run(next, i);
+                    kill(next->pid, SIGCONT);
+                    next->status = RUNNING;
+                    running_processes[i] = next;
+                    latest_running[i] = priority_allocater();
                 }
             }
         }
@@ -174,33 +197,34 @@ void perform_run(char* args[])
         return;
     }
     if (pid == 0) {
-        const size_t len = strlen(p->args[0]);
+        const size_t len = strlen(args[0]);
         char exec[len + 3];
         strcpy(exec, "./");
-        strcat(exec, p->args[0]);
-        execvp(exec, p->args);
+        strcat(exec, args[0]);
+        execvp(exec, args);
         // Unreachable code unless execution failed.
         exit(EXIT_FAILURE);
     }
 
     if (kill(pid, SIGSTOP) == -1) {
-        fprintf(stderr, "Could not create child process\n", pid);
+        fprintf(stderr, "Could not create child process %d\n", pid);
         perform_exit();
         exit(EXIT_FAILURE);
     }
-
-    if(running_index != -1){
-        p->pid = pid;
-        p->index = p_idx;
-        trigger_resume(p);
+    p->pid = pid;
+    p->index = p_idx;
+    process_records[p_idx] = p;
+    if (running_index != -1) {
+        kill(p->pid, SIGCONT);
+        p->status = RUNNING;
         running_processes[running_index] = p;
-        process_records[p_idx] = p;
-//        printf("[%d] %d currently running\n", p->index, p->pid);
+        latest_running[running_index] = priority_allocater();
+        print_process_priorities();
+        //        printf("[%d] %d currently running\n", p->index, p->pid);
     } else {
+        p->status = READY;
         add_to_queue(p);
-//      printf("added to queue");
     }
-    
 }
 
 void perform_kill(char* args[])
@@ -210,28 +234,34 @@ void perform_kill(char* args[])
         printf("The process ID must be a positive integer.\n");
         return;
     }
+    int running_index = -1;
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         process_record* const p = process_records[i];
-        if(p != NULL && p->pid == pid && p->status != TERMINATED){
-            
+        if (p != NULL && p->pid == pid) {
+            running_index = i;
+            trigger_kill(p);
+            break;
         }
     }
-    trigger_kill(pid);
+    process_record* next = remove_from_queue();
+    if (next != NULL) {
+        kill(next->pid, SIGCONT);
+        next->status = RUNNING;
+        running_processes[running_index] = next;
+        latest_running[running_index] = priority_allocater();
+    }
 }
 
-void trigger_kill(pid_t pid)
+void trigger_kill(process_record* p)
 {
-    
-    for (int i = 0; i < MAX_PROCESSES; ++i) {
-        process_record* const p = process_records[i];
-        if ((p->pid == pid) && (p->status != TERMINATED)) {
-            kill(p->pid, SIGTERM);
-            printf("[%d] %d killed\n", i, p->pid);
-            p->status = TERMINATED;
-            return;
-        }
+
+    if (p->status != TERMINATED) {
+        kill(p->pid, SIGTERM);
+        printf("[%d] %d killed\n", p->index, p->pid);
+        p->status = TERMINATED;
+        return;
     }
-    printf("Process %d not found.\n", pid);
+    printf("Process %d not found.\n", p->pid);
 }
 
 void perform_stop(char* args[])
@@ -243,12 +273,14 @@ void perform_stop(char* args[])
     }
     // find the running process
     process_record* pr = NULL;
+    int running_index = -1;
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] == NULL) {
             continue;
         }
         if (pid == running_processes[i]->pid) {
             pr = running_processes[i];
+            running_index = i;
         }
     }
 
@@ -256,13 +288,19 @@ void perform_stop(char* args[])
         printf("Unable to locate process with pid %d", pid);
         return;
     }
+    printf("stopping %d\n", pr->pid);
     kill(pr->pid, SIGSTOP);
     pr->status = STOPPED;
+    priority_manager(running_index);
+    running_processes[running_index] = NULL;
 
     // start next process automatically
-    process_record* pr = remove_from_queue();
-    if (pr != NULL) {
-        trigger_run(pr, i);
+    process_record* next = remove_from_queue();
+    if (next != NULL) {
+        kill(next->pid, SIGCONT);
+        next->status = RUNNING;
+        running_processes[running_index] = next;
+        latest_running[running_index] = priority_allocater();
     }
 }
 
@@ -279,6 +317,7 @@ void perform_resume(char* args[])
         if (process_records[i] != NULL) {
             if (process_records[i]->pid == pid) {
                 pr = process_records[i];
+                break;
             }
         }
     }
@@ -301,27 +340,23 @@ void perform_resume(char* args[])
     }
 
     // if unable to find slot, free a slot by removing the lastest running process
-    if (running_index = -1) {
+    if (running_index == -1) {
         int to_stop_idx = lowest_priority_index();
         process_record* to_stop = running_processes[to_stop_idx];
-        kill(to_stop->pid, SIGSTOP);
+        if (kill(to_stop->pid, SIGSTOP) != 0) {
+            printf("unable to stop\n");
+        }
         to_stop->status = READY;
         add_to_queue_front(to_stop);
         running_index = to_stop_idx;
     }
 
-
-
-    trigger_resume(pr);
-    printf("resuming %d", pr->pid);
+    printf("resuming %d\n", pr->pid);
+    kill(pr->pid, SIGCONT);
+    pr->status = RUNNING;
     running_processes[running_index] = pr;
 }
 
-void trigger_resume(process_record* p)
-{
-    kill(p->pid, SIGCONT);
-    p->status = RUNNING;
-}
 void perform_list(void)
 {
     bool anything = false;
@@ -337,26 +372,18 @@ void perform_list(void)
     }
 }
 
-void free_process(process_record* pr)
-{
-    for (int i = 0; i < 10 && pr->args[i] != NULL; i++) {
-        free(pr->args[i]);
-    }
-    free(pr);
-}
-
 void perform_exit(void)
 {
     // terminate running processes
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] != NULL) {
-            trigger_kill(running_processes[i]->pid);
+            trigger_kill(running_processes[i]);
         }
     }
     // free running processes
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_records[i] != NULL) {
-            free_process(process_records[i]);
+            free(process_records[i]);
         }
     }
 
@@ -440,34 +467,39 @@ void run_terminal(int writing_pipe)
 
 void run_process_manager(int reading_pipe)
 {
-
+    print_process_priorities();
     while (true) {
         char buffer[100];
-        if (read(reading_pipe, buffer, 100) > 0) {
-            buffer[99] = '\0';
+        ssize_t bytes_read = read(reading_pipe, buffer, 100);
+
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0';
             char* args[10];
-            const int args_count = sizeof(args) / sizeof(*args);
-            process_input(buffer, args, args_count);
+            process_input(buffer, args, 10);
             char* cmd = args[0];
+
             if (strcmp(cmd, "kill") == 0) {
                 perform_kill(&args[1]);
             } else if (strcmp(cmd, "run") == 0) {
                 perform_run(&args[1]);
             } else if (strcmp(cmd, "list") == 0) {
                 perform_list();
-                // } else if (strcmp(cmd, "resume") == 0) {
-                //     perform_resume(&args[1]);
+            } else if (strcmp(cmd, "resume") == 0) {
+                perform_resume(&args[1]);
             } else if (strcmp(cmd, "stop") == 0) {
                 perform_stop(&args[1]);
             } else if (strcmp(cmd, "exit") == 0) {
                 perform_exit();
                 break;
             }
+
+            fflush(stdout);
         }
-        // manage processes
-        process_tracker();
+
+        process_tracker(); // ✅ Run process tracker continuously
+
+        usleep(100000); // ✅ Wait 100ms before checking again (prevents CPU overload)
     }
-    fprintf(stderr, "child > unable to read\n");
 }
 
 int main(void)
