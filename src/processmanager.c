@@ -24,7 +24,6 @@ typedef struct process_record {
     pid_t pid;
     int index;
     process_status status;
-    char* args[10];
 } process_record;
 
 /******************************************************************************
@@ -50,16 +49,15 @@ int rem_index = 0;
  * Initialising
  ******************************************************************************/
 
-void trigger_run(process_record* p, int running_index);
 void trigger_kill(pid_t pid);
-void trigger_stop(pid_t pid);
+void trigger_stop(process_record* pr);
 
 // priority manager: if any processes have terminated/ stopped, increases the priority of the remaining processes
 void priority_manager(int stoppedIndex)
 {
     int current_priority = latest_running[stoppedIndex];
     for (int i = 0; i < MAX_RUNNING; i++) {
-        if(latest_running[i] > current_priority){
+        if (latest_running[i] > current_priority) {
             latest_running[i]--;
         }
     }
@@ -83,29 +81,18 @@ int priority_allocater(int index)
     }
 }
 
-process_record* create_process(char* args[], int index)
+int lowest_priority_index()
 {
-
-    process_record* pr = (process_record*)malloc(sizeof(process_record));
-    if (pr == NULL) {
-        printf("Memory allocation failed!\n");
-        exit(1);
+    // there will no process with a lower priority than MAX_RUNNING
+    int current_running = MAX_RUNNING;
+    int lowest_index = -1;
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (latest_running[i] != -1 && latest_running[i] < current_running) {
+            current_running = latest_running[i];
+            lowest_index = i;
+        }
     }
-
-    pr->pid = -1;
-    pr->index = index;
-    pr->status = READY;
-
-    int i;
-    for (i = 0; i < 10 && args[i] != NULL; i++) {
-        pr->args[i] = strdup(args[i]);
-    }
-
-    for (; i < 10; i++) {
-        pr->args[i] = NULL;
-    }
-
-    return pr;
+    return lowest_index;
 }
 
 void add_to_queue(process_record* pr)
@@ -165,29 +152,22 @@ void process_tracker(void)
 void perform_run(char* args[])
 {
     // find a slot to run in
-    int index = -1;
+    process_record* p = (process_record*)malloc(sizeof(process_record));
+    int running_index = -1;
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] == NULL) {
-            index = i;
+            running_index = i;
             break;
         }
     }
-    process_records[proc_index] = create_process(args, proc_index);
-    // if unable to find a slot, add to process queue
-    if (index < 0) {
-        printf(
-            "no running process slots available. Adding your request to the "
-            "queue.\n");
-        add_to_queue(process_records[proc_index]);
-        return;
-    }
-    // else: run the commmand
-    trigger_run(process_records[proc_index], index);
-    proc_index++;
-}
 
-void trigger_run(process_record* p, int running_index)
-{
+    int p_idx = -1;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (process_records[i] == NULL) {
+            p_idx = i;
+            break;
+        }
+    }
     pid_t pid = fork();
     if (pid < 0) {
         fprintf(stderr, "fork failed\n");
@@ -202,9 +182,18 @@ void trigger_run(process_record* p, int running_index)
         // Unreachable code unless execution failed.
         exit(EXIT_FAILURE);
     }
+
+    if (kill(pid, SIGSTOP) == -1) {
+        fprintf(stderr, "Could not create child process\n", pid);
+        perform_exit();
+        exit(EXIT_FAILURE);
+    }
+
     p->pid = pid;
     p->status = RUNNING;
+    p->index = p_idx;
     running_processes[running_index] = p;
+    process_records[p_idx] = p;
     printf("[%d] %d currently running\n", p->index, p->pid);
 }
 
@@ -222,7 +211,7 @@ void trigger_kill(pid_t pid)
     }
     for (int i = 0; i < MAX_PROCESSES; ++i) {
         process_record* const p = process_records[i];
-        if ((p->pid == pid) && (p->status == RUNNING)) {
+        if ((p->pid == pid) && (p->status != TERMINATED)) {
             kill(p->pid, SIGTERM);
             printf("[%d] %d killed\n", i, p->pid);
             p->status = TERMINATED;
@@ -235,46 +224,90 @@ void trigger_kill(pid_t pid)
 void perform_stop(char* args[])
 {
     const pid_t pid = atoi(args[0]);
-    trigger_stop(pid);
-}
-
-void trigger_stop(pid_t pid)
-{
-    // only a currently running process can be stopped
     if (pid <= 0) {
         printf("The process ID must be a positive integer.\n");
         return;
     }
+    // find the running process
+    process_record* pr = NULL;
     for (int i = 0; i < MAX_RUNNING; i++) {
         if (running_processes[i] == NULL) {
             continue;
         }
         if (pid == running_processes[i]->pid) {
-            printf("stopping %d\n", pid);
-            if (kill(pid, SIGSTOP) != 0) {
-                fprintf(stderr, "Unable to stop process with pid %d\n", pid);
-                return;
-            }
-            // 1. modify current process record
-            running_processes[i]->status = STOPPED;
-            // 2. remove the next process in queue
-            process_record* pr = remove_from_queue();
-            // 3. start the next process if not null
-            if (pr != NULL) {
-                trigger_run(pr, i);
-            }
+            pr = running_processes[i];
         }
+    }
+
+    if (pr == NULL) {
+        printf("Unable to locate process with pid %d", pid);
+        return;
+    }
+    kill(pr->pid, SIGSTOP);
+    pr->status = STOPPED;
+
+    // start next process automatically
+    process_record* pr = remove_from_queue();
+    if (pr != NULL) {
+        trigger_run(pr, i);
     }
 }
 
 void perform_resume(char* args[])
 {
     const pid_t pid = atoi(args[0]);
-    trigger_resume(pid);
+    if (pid <= 0) {
+        printf("The process ID must be a positive integer.\n");
+        return;
+    }
+
+    process_record* pr = NULL;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (process_records[i] != NULL) {
+            if (process_records[i]->pid == pid) {
+                pr = process_records[i];
+            }
+        }
+    }
+
+    if (pr == NULL) {
+        printf("Unable to locate process with pid %d", pid);
+        return;
+    }
+    if (pr->status == RUNNING) {
+        printf("Process, %d is already running\n", pid);
+        return;
+    }
+    // find available running slot
+    int running_index = -1;
+    for (int i = 0; i < MAX_RUNNING; i++) {
+        if (running_processes[i] == NULL) {
+            running_index = i;
+            break;
+        }
+    }
+
+    // if unable to find slot, free a slot by removing the lastest running process
+    if (running_index = -1) {
+        int to_stop_idx = lowest_priority_index();
+        process_record* to_stop = running_processes[to_stop_idx];
+        kill(to_stop->pid, SIGSTOP);
+        to_stop->status = READY;
+        add_to_queue_front(to_stop);
+        running_index = to_stop_idx;
+    }
+
+
+
+    trigger_resume(pr);
+    printf("resuming %d", pr->pid);
+    running_processes[running_index] = pr;
 }
 
-void trigger_resume(pid_t pid)
+void trigger_resume(process_record* p)
 {
+    kill(p->pid, SIGCONT);
+    p->status = RUNNING;
 }
 void perform_list(void)
 {
