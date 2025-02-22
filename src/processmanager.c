@@ -58,6 +58,7 @@ void initialise(void)
 void trigger_kill(process_record* p);
 void perform_exit(void);
 void start_next_process(int running_index);
+
 /******************************************************************************
  * Queue and priority management
  ******************************************************************************/
