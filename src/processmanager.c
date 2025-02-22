@@ -221,17 +221,19 @@ void trigger_stop(pid_t pid)
             continue;
         }
         if (pid == running_processes[i]->pid) {
+            printf("stopping %d\n", pid);
             if (kill(pid, SIGSTOP) != 0) {
                 fprintf(stderr, "Unable to stop process with pid %d\n", pid);
-                perform_exit();
                 return;
             }
             // 1. modify current process record
             running_processes[i]->status = STOPPED;
             // 2. remove the next process in queue
             process_record* pr = remove_from_queue();
-            // 3. start the next process
-            trigger_run(pr, i);
+            // 3. start the next process if not null
+            if(pr != NULL){
+                trigger_run(pr, i);
+            }
         }
     }
 }
@@ -374,8 +376,8 @@ void run_process_manager(int reading_pipe)
                 perform_list();
                 // } else if (strcmp(cmd, "resume") == 0) {
                 //     perform_resume(&args[1]);
-                // } else if (strcmp(cmd, "stop") == 0) {
-                //     perform_stop(&args[1]);
+            } else if (strcmp(cmd, "stop") == 0) {
+                perform_stop(&args[1]);
             } else if (strcmp(cmd, "exit") == 0) {
                 perform_exit();
                 break;
